@@ -233,6 +233,57 @@ curl https://localhost/ejbca/ejbca-rest-api/v1/certificate/status \
   --key ./superadmin.key
 ```
 
+## Configure SignServer
+
+To quickly configure SignServer, you can use the REST API to create a P12 Crypto Worker and a Plain Signer that uses client-side hashing:
+
+```bash
+curl -X 'POST' \
+  'https://localhost/signserver/rest/v1/workers' \
+  --cacert ./Sub-CA-chain.pem \
+  --cert ./superadmin.pem \
+  --key ./superadmin.key \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Keyfactor-Requested-With: APIClient' \
+  -d '{
+  "properties": {
+    "CRYPTOTOKEN_IMPLEMENTATION_CLASS": "org.signserver.server.cryptotokens.KeystoreCryptoToken",
+    "IMPLEMENTATION_CLASS": "org.signserver.server.signers.CryptoWorker",
+    "KEYSTOREPASSWORD": "foo123",
+    "KEYSTOREPATH": "/opt/signserver/res/test/dss10/dss10_keystore.p12",
+    "KEYSTORETYPE": "PKCS12",
+    "NAME": "CryptoTokenP12",
+    "TYPE": "CRYPTO_WORKER"
+  }
+}'
+
+curl -X 'POST' \
+  'https://localhost/signserver/rest/v1/workers' \
+  --cacert ./Sub-CA-chain.pem \
+  --cert ./superadmin.pem \
+  --key ./superadmin.key \
+  -H 'accept: application/json' \
+  -H 'Content-Type: application/json' \
+  -H 'X-Keyfactor-Requested-With: APIClient' \
+  -d '{
+  "properties": {
+    "ACCEPTED_HASH_DIGEST_ALGORITHMS": "SHA-256,SHA-384,SHA-512",
+    "AUTHTYPE": "NOAUTH",
+    "CLIENTSIDEHASHING": "true",
+    "CRYPTOTOKEN": "CryptoTokenP12",
+    "DEFAULTKEY": "signer00003",
+    "DISABLEKEYUSAGECOUNTER": "true",
+    "DO_LOGREQUEST_DIGEST": "",
+    "IMPLEMENTATION_CLASS": "org.signserver.module.cmssigner.PlainSigner",
+    "LOGREQUEST_DIGESTALGORITHM": "",
+    "NAME": "PlainSigner",
+    "SIGNATUREALGORITHM": "NONEwithRSA",
+    "TYPE": "PROCESSABLE"
+  }
+}'
+```
+
 ## Uninstall
 
 To uninstall EJBCA and SignServer, run the following command:
