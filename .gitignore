@@ -1,0 +1,16 @@
+# Certificates
+*.pem
+*.key
+*.pfx
+*.cer
+*.p12
+
+# IDE
+.idea
+.DS_Store
+
+# Helm artifacts
+*.tgz
+
+# Deployment artifacts
+ejbca.env

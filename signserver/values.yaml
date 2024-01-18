@@ -1,0 +1,123 @@
+# Default values for signserver.
+# This is a YAML-formatted file.
+
+nameOverride: ""
+fullnameOverride: ""
+
+signserver:
+  replicaCount: 1
+
+  podAnnotations: {}
+
+  image:
+    repository: keyfactor/signserver-ce
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: "6.2.0"
+    imagePullSecrets: []
+
+  containerPorts:
+    - name: http
+      containerPort: 8081
+      protocol: TCP
+    - name: https
+      containerPort: 8082
+      protocol: TCP
+
+  proxyHttpBind: "0.0.0.0"
+  logAuditToDatabase: "true"
+  
+  service:
+    name: signserver-service
+    type: NodePort
+    ports:
+      - name: http
+        port: 8081
+        targetPort: http
+        nodePort: 31080
+        protocol: TCP
+      - name: https
+        port: 8082
+        targetPort: https
+        nodePort: 31443
+        protocol: TCP
+
+  ingress:
+    enabled: false
+    name: signserver-ingress
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+      nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
+      nginx.ingress.kubernetes.io/auth-tls-secret: signserver/signserver-ingress-auth
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        proxy_set_header SSL_CLIENT_CERT $ssl_client_cert;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    hosts:
+      - host: signserver-node1.test
+        tlsSecretName: signserver-ingress-tls
+        paths:
+          - path: /signserver/
+            pathType: Prefix
+            serviceName: signserver-service
+            portName: https
+
+  volumes:
+    - name: signserver-trusted-ca
+      configMapName: signserver-trusted-ca
+      mountPath: /mnt/external/secrets/tls/cas/
+
+database:
+  replicaCount: 1
+
+  name: signserver
+  username: signserver
+  password: signserver
+  rootPassword: signserver
+
+  image:
+    repository: mariadb
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: "latest"
+    imagePullSecrets: []
+
+  service:
+    name: signserver-database-service
+    type: ClusterIP
+    port: 3306
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources: {}
+  # limits:
+  #   cpu: "16"
+  #   memory: "4096Mi"
+  # requests:
+  #   cpu: 1000m
+  #   memory: "2048Mi"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

@@ -1,0 +1,73 @@
+name: 'Deploy EJBCA and SignServer'
+description: 'Deploys a single node K8s cluster (if configured) and deploys EJBCA and SignServer'
+
+inputs:
+  token:
+    description: GitHub token. Used to checkout the repository
+    required: false
+  deploy-k8s:
+    description: Whether or not to deploy a single node K8s cluster
+    required: false
+    default: 'true'
+  deploy-nginx-ingress:
+    description: Whether or not to deploy NGINX Ingress Controller
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      shell: bash
+      run: |
+        # Checkout the repository
+        if [ -z "${{ inputs.token }}" ]; then
+          git clone https://github.com/Keyfactor/EJBCA-SignServer-K8sForge.git
+        else
+          git clone "https://${{ inputs.token }}@github.com/Keyfactor/EJBCA-SignServer-K8sForge.git"
+        fi
+
+    - name: Create k8s Kind Cluster
+      if: ${{ inputs.deploy-k8s == 'true' }}
+      uses: helm/kind-action@v1.5.0
+      with:
+        config: EJBCA-SignServer-K8sForge/kindconfig.yaml
+    
+    - name: Deploy NGINX Ingress Controller
+      shell: bash
+      if: ${{ inputs.deploy-nginx-ingress == 'true' }}
+      run: |
+        kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+
+        kubectl patch configmap ingress-nginx-controller -n ingress-nginx --patch '{"data":{"allow-snippet-annotations":"true"}}'
+
+        kubectl wait --namespace ingress-nginx \
+          --for=condition=ready pod \
+          --selector=app.kubernetes.io/component=controller \
+          --timeout=90s
+
+    - name: Deploy EJBCA and SignServer
+      shell: bash
+      run: |
+        cd EJBCA-SignServer-K8sForge
+        
+        ./deploy.sh
+
+    - name: Source environment variables for EJBCA and SignServer
+      shell: bash
+      run: |
+        cd EJBCA-SignServer-K8sForge
+
+        source ejbca.env
+        echo "EJBCA_HOSTNAME=$EJBCA_HOSTNAME" >> $GITHUB_ENV
+        echo "EJBCA_CA_NAME=$EJBCA_CA_NAME" >> $GITHUB_ENV
+        echo "EJBCA_CERTIFICATE_PROFILE_NAME=$EJBCA_CERTIFICATE_PROFILE_NAME" >> $GITHUB_ENV
+        echo "EJBCA_END_ENTITY_PROFILE_NAME=$EJBCA_END_ENTITY_PROFILE_NAME" >> $GITHUB_ENV
+        echo "EJBCA_CSR_SUBJECT=$EJBCA_CSR_SUBJECT" >> $GITHUB_ENV
+        echo "EJBCA_CLIENT_CERT_PATH=$EJBCA_CLIENT_CERT_PATH" >> $GITHUB_ENV
+        echo "EJBCA_CLIENT_KEY_PATH=$EJBCA_CLIENT_KEY_PATH" >> $GITHUB_ENV
+        echo "EJBCA_CA_CERT_PATH=$EJBCA_CA_CERT_PATH" >> $GITHUB_ENV
+        echo "SIGNSERVER_HOSTNAME=$SIGNSERVER_HOSTNAME" >> $GITHUB_ENV
+        echo "SIGNSERVER_CLIENT_CERT_PATH=$SIGNSERVER_CLIENT_CERT_PATH" >> $GITHUB_ENV
+        echo "SIGNSERVER_CLIENT_CERT_KEY_PATH=$SIGNSERVER_CLIENT_CERT_KEY_PATH" >> $GITHUB_ENV
+        echo "SIGNSERVER_CA_CERT_PATH=$SIGNSERVER_CA_CERT_PATH" >> $GITHUB_ENV

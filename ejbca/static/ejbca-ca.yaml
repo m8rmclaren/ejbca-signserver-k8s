@@ -1,0 +1,124 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: ejbca-service
+  labels:
+    app: ejbca
+spec:
+  type: NodePort
+  ports:
+  - name: ejbca-http
+    nodePort: 30080
+    port: 8081
+    targetPort: ejbca-http
+    protocol: TCP
+  - name: ejbca-https
+    nodePort: 30443
+    port: 8082
+    targetPort: ejbca-https
+    protocol: TCP
+  selector:
+    app: ejbca
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ejbca-deployment 
+  labels:
+    app: ejbca
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: ejbca
+  template:
+    metadata:
+      labels:
+        app: ejbca
+    spec:
+      containers:
+        - name: ejbca-node1
+          image: keyfactor/ejbca-ce:latest
+          imagePullPolicy: Always
+          resources:
+            limits:
+              cpu: "16"
+              memory: "4096Mi"
+            requests:
+              cpu: 1000m
+              memory: "2048Mi"
+          ports:
+            - containerPort: 8081
+              name: ejbca-http
+            - containerPort: 8082
+              name: ejbca-https
+          env:
+            - name: DATABASE_JDBC_URL
+              value: "jdbc:mariadb://ejbca-database-service:3306/ejbca?characterEncoding=utf8"
+            - name: DATABASE_USER
+              value: ejbca
+            - name: PROXY_HTTP_BIND
+              value: "0.0.0.0"
+            - name: DATABASE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: ejbca-mariadb-secret
+                  key: ejbca-db-password
+            - name: LOG_AUDIT_TO_DB
+              value: "true"
+            - name: INITIAL_ADMIN
+              value: "ManagementCA;WITH_COMMONNAME;SuperAdmin" # ";PublicAccessAuthenticationToken:TRANSPORT_ANY;" # 
+            - name: TLS_SETUP_ENABLED
+              value: "simple"
+          volumeMounts:
+            - name: ejbca-eep-admininternal
+              mountPath: /opt/keyfactor/stage/admininternal
+            - name: ejbca-eep-ephemeral
+              mountPath: /opt/keyfactor/stage/ephemeral
+            - name: ejbca-eep-k8sendentity
+              mountPath: /opt/keyfactor/stage/k8sendentity
+            - name: ejbca-eep-userauthentication
+              mountPath: /opt/keyfactor/stage/userauthentication
+            - name: "ejbca-eep-tlsserveranyca"
+              mountPath: "/opt/keyfactor/stage/tlsserveranyca"
+            - name: ejbca-cp-codesign1y
+              mountPath: /opt/keyfactor/stage/codesign1y
+            - name: ejbca-cp-istioauth3d
+              mountPath: /opt/keyfactor/stage/istioauth3d
+            - name: ejbca-cp-tlsclientauth
+              mountPath: /opt/keyfactor/stage/tlsclientauth
+            - name: ejbca-cp-tlsserverauth
+              mountPath: /opt/keyfactor/stage/tlsserverauth
+            - name: ejbca-cp-auth20483y
+              mountPath: /opt/keyfactor/stage/auth20483y
+      volumes:
+        - name: ejbca-eep-admininternal
+          configMap:
+            name: ejbca-eep-admininternal
+        - name: ejbca-eep-ephemeral
+          configMap:
+            name: ejbca-eep-ephemeral
+        - name: ejbca-eep-k8sendentity
+          configMap:
+            name: ejbca-eep-k8sendentity
+        - name: ejbca-eep-userauthentication
+          configMap:
+            name: ejbca-eep-userauthentication
+        - name: ejbca-cp-codesign1y
+          configMap:
+            name: ejbca-cp-codesign1y
+        - name: ejbca-cp-istioauth3d
+          configMap:
+            name: ejbca-cp-istioauth3d
+        - name: ejbca-cp-tlsclientauth
+          configMap:
+            name: ejbca-cp-tlsclientauth
+        - name: ejbca-cp-tlsserverauth
+          configMap:
+            name: ejbca-cp-tlsserverauth
+        - name: ejbca-cp-auth20483y
+          configMap:
+            name: ejbca-cp-auth20483y
+        - name: "ejbca-eep-tlsserveranyca"
+          configMap:
+            name: "ejbca-eep-tlsserveranyca"

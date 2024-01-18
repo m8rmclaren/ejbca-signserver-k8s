@@ -1,0 +1,21 @@
+{{- $svcType := .Values.signserver.service.type }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.signserver.service.name }}
+  labels:
+    {{- include "signserver.labels" . | nindent 4 }}
+spec:
+  type: {{ .Values.signserver.service.type }}
+  ports:
+  {{- range .Values.signserver.service.ports }}
+    - name: {{ .name }}
+      port: {{ .port }}
+      targetPort: {{ .targetPort}}
+      protocol: {{ .protocol }}
+      {{- if contains "NodePort" $svcType }}
+      nodePort: {{ .nodePort }}
+      {{- end }}
+  {{- end }}
+  selector:
+    {{- include "signserver.selectorLabels" . | nindent 4 }}

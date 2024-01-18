@@ -1,0 +1,35 @@
+{{- if .Values.signserver.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.signserver.ingress.name }}
+  labels:
+    {{- include "signserver.labels" . | nindent 4 }}
+  {{- with .Values.signserver.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.signserver.ingress.className }}
+  tls:
+    {{- range .Values.signserver.ingress.hosts }}
+    - secretName: {{ .tlsSecretName }}
+      hosts:
+        - {{ .host }}
+    {{- end }}
+  rules:
+    {{- range .Values.signserver.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+        {{- range .paths }}
+        - path: {{ .path }}
+          pathType: {{ .pathType }}
+          backend:
+            service:
+              name: {{ .serviceName }}
+              port:
+                name: {{ .portName }}
+        {{- end }}
+    {{- end }}
+{{- end }}

@@ -1,0 +1,151 @@
+# Default values for ejbca.
+# This is a YAML-formatted file.
+
+nameOverride: ""
+fullnameOverride: ""
+
+ejbca:
+  replicaCount: 1
+
+  podAnnotations: {}
+
+  image:
+    repository: keyfactor/ejbca-ce
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: "latest"
+    imagePullSecrets: []
+
+  containerPorts:
+    - name: ejbca-http
+      containerPort: 8081
+      protocol: TCP
+    - name: ejbca-https
+      containerPort: 8082
+      protocol: TCP
+
+  proxyHttpBind: "0.0.0.0"
+  logAuditToDatabase: "true"
+  initialAdmin: "ManagementCA;WITH_COMMONNAME;SuperAdmin" # ";PublicAccessAuthenticationToken:TRANSPORT_ANY;"
+  
+  service:
+    name: ejbca-service
+    type: NodePort
+    ports:
+      - name: ejbca-http
+        port: 8081
+        targetPort: ejbca-http
+        nodePort: 30080
+        protocol: TCP
+      - name: ejbca-https
+        port: 8082
+        targetPort: ejbca-https
+        nodePort: 30443
+        protocol: TCP
+
+  ingress:
+    enabled: false
+    name: ejbca-ingress
+    className: "nginx"
+    annotations:
+      nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+      nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
+      nginx.ingress.kubernetes.io/auth-tls-secret: ejbca/ejbca-ingress-auth
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        proxy_set_header SSL_CLIENT_CERT $ssl_client_cert;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    hosts:
+      - host: ejbca-node1.test
+        tlsSecretName: ejbca-ingress-tls
+        paths:
+          - path: /ejbca/
+            pathType: Prefix
+            serviceName: ejbca-service
+            portName: ejbca-https
+
+  volumes:
+    - name: ejbca-eep-admininternal
+      configMapName: ejbca-eep-admininternal
+      mountPath: /opt/keyfactor/stage/admininternal
+    - name: ejbca-eep-ephemeral
+      configMapName: ejbca-eep-ephemeral
+      mountPath: /opt/keyfactor/stage/ephemeral
+    - name: ejbca-eep-k8sendentity
+      configMapName: ejbca-eep-k8sendentity
+      mountPath: /opt/keyfactor/stage/k8sendentity
+    - name: ejbca-eep-userauthentication
+      configMapName: ejbca-eep-userauthentication
+      mountPath: /opt/keyfactor/stage/userauthentication
+    - name: ejbca-eep-tlsserveranyca
+      configMapName: ejbca-eep-tlsserveranyca
+      mountPath: /opt/keyfactor/stage/tlsserveranyca
+    - name: ejbca-cp-codesign1y
+      configMapName: ejbca-cp-codesign1y
+      mountPath: /opt/keyfactor/stage/codesign1y
+    - name: ejbca-cp-istioauth3d
+      configMapName: ejbca-cp-istioauth3d
+      mountPath: /opt/keyfactor/stage/istioauth3d
+    - name: ejbca-cp-tlsclientauth
+      configMapName: ejbca-cp-tlsclientauth
+      mountPath: /opt/keyfactor/stage/tlsclientauth
+    - name: ejbca-cp-tlsserverauth
+      configMapName: ejbca-cp-tlsserverauth
+      mountPath: /opt/keyfactor/stage/tlsserverauth
+    - name: ejbca-cp-auth20483y
+      configMapName: ejbca-cp-auth20483y
+      mountPath: /opt/keyfactor/stage/auth20483y
+
+database:
+  replicaCount: 1
+
+  name: ejbca
+  username: ejbca
+  password: ejbca
+  rootPassword: ejbca
+
+  image:
+    repository: mariadb
+    pullPolicy: Always
+    # Overrides the image tag whose default is the chart appVersion.
+    tag: "latest"
+    imagePullSecrets: []
+
+  service:
+    name: ejbca-database-service
+    type: ClusterIP
+    port: 3306
+
+serviceAccount:
+  # Specifies whether a service account should be created
+  create: true
+  # Annotations to add to the service account
+  annotations: {}
+  # The name of the service account to use.
+  # If not set and create is true, a name is generated using the fullname template
+  name: ""
+
+podSecurityContext: {}
+  # fsGroup: 2000
+
+securityContext: {}
+  # capabilities:
+  #   drop:
+  #   - ALL
+  # readOnlyRootFilesystem: true
+  # runAsNonRoot: true
+  # runAsUser: 1000
+
+resources: {}
+  # limits:
+  #   cpu: "16"
+  #   memory: "4096Mi"
+  # requests:
+  #   cpu: 1000m
+  #   memory: "2048Mi"
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
