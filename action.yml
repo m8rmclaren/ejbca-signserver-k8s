@@ -49,14 +49,14 @@ runs:
     - name: Deploy EJBCA and SignServer
       shell: bash
       run: |
-        cd EJBCA-SignServer-K8sForge
+        cd ejbca-signserver-k8s
         
         ./deploy.sh
 
     - name: Source environment variables for EJBCA and SignServer
       shell: bash
       run: |
-        cd EJBCA-SignServer-K8sForge
+        cd ejbca-signserver-k8s
 
         source ejbca.env
         echo "EJBCA_HOSTNAME=$EJBCA_HOSTNAME" >> $GITHUB_ENV
