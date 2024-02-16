@@ -31,7 +31,7 @@ runs:
       if: ${{ inputs.deploy-k8s == 'true' }}
       uses: helm/kind-action@v1.5.0
       with:
-        config: EJBCA-SignServer-K8sForge/kindconfig.yaml
+        config: ejbca-signserver-k8s/kindconfig.yaml
     
     - name: Deploy NGINX Ingress Controller
       shell: bash
