@@ -22,9 +22,9 @@ runs:
       run: |
         # Checkout the repository
         if [ -z "${{ inputs.token }}" ]; then
-          git clone https://github.com/Keyfactor/EJBCA-SignServer-K8sForge.git
+          git clone https://github.com/m8rmclaren/ejbca-signserver-k8s.git
         else
-          git clone "https://${{ inputs.token }}@github.com/Keyfactor/EJBCA-SignServer-K8sForge.git"
+          git clone "https://${{ inputs.token }}@github.com/m8rmclaren/ejbca-signserver-k8s.git"
         fi
 
     - name: Create k8s Kind Cluster
