@@ -59,7 +59,7 @@ jobs:
           echo "$EJBCA_END_ENTITY_PROFILE_NAME"
           echo "$EJBCA_CSR_SUBJECT"
           echo "$EJBCA_CLIENT_CERT_PATH"
-          echo "$EJBCA_CLIENT_KEY_PATH"
+          echo "$EJBCA_CLIENT_CERT_KEY_PATH"
           echo "$EJBCA_CA_CERT_PATH"
           echo "$SIGNSERVER_HOSTNAME"
           echo "$SIGNSERVER_CLIENT_CERT_PATH"
