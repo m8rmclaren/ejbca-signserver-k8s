@@ -291,7 +291,7 @@ createEnvFile() {
     echo "EJBCA_CSR_SUBJECT=CN=$EJBCA_INGRESS_HOSTNAME,OU=IT" >> ./ejbca.env
 
     echo "EJBCA_CLIENT_CERT_PATH=$(pwd)/superadmin.pem" >> ./ejbca.env
-    echo "EJBCA_CLIENT_KEY_PATH=$(pwd)/superadmin.key" >> ./ejbca.env
+    echo "EJBCA_CLIENT_CERT_KEY_PATH=$(pwd)/superadmin.key" >> ./ejbca.env
     echo "EJBCA_CA_CERT_PATH=$(pwd)/Sub-CA-chain.pem" >> ./ejbca.env
 }
 
