@@ -131,25 +131,27 @@ createSubCA() {
 # Imports the staged certificate profiles into EJBCA
 # cluster_namespace - The namespace where the EJBCA node is running
 # ejbca_pod_name - The name of the Pod running the EJBCA node
-importStagedEndEntityProfiles() {
+importStagedEndEntityProfile() {
     local cluster_namespace=$1
     local ejbca_pod_name=$2
+    local full_path=$3
 
-    # Define an array with the names of the config files
-    config_files=("auth20483y" "codesign1y" "istioauth3d" "tlsclientauth" "tlsserverauth" "tlsserveranyca" "admininternal" "ephemeral" "k8sendentity" "userauthentication")
+    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh ca importprofiles \
+        -d "$full_path"
+}
 
-    # Base directory where the config files are located
-    base_directory="/opt/keyfactor/stage"
+# Imports the staged certificate profiles into EJBCA
+# cluster_namespace - The namespace where the EJBCA node is running
+# ejbca_pod_name - The name of the Pod running the EJBCA node
+importStagedEEP() {
+    local cluster_namespace=$1
+    local ejbca_pod_name=$2
+    local base_directory=$3
+    local config_file=$4
 
-    # Loop through each file and import them into EJBCA
-    for file in "${config_files[@]}"; do
-        echo "Importing $file config file"
-
-        full_path="${base_directory}/${file}"
-
-        kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh ca importprofiles \
-            -d "$full_path"
-    done
+    echo "Importing $config_file from $base_directory"
+    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh ra importeep \
+        -d "$base_directory/$config_file"
 }
 
 # Creates the SuperAdmin end entity, enrolls its certificate,
@@ -162,16 +164,17 @@ importStagedEndEntityProfiles() {
 createSuperAdmin() {
     local cluster_namespace=$1
     local ejbca_pod_name=$2
-    local ca_filename=$3
-    local end_entity_filename=$4
-    local end_entity_key_filename=$5
+    local common_name=$3
+    local ca_filename=$4
+    local end_entity_filename=$5
+    local end_entity_key_filename=$6
 
     echo "Creating SuperAdmin"
     
     # Create SuperAdmin
     kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh ra addendentity \
         --username "SuperAdmin" \
-        --dn "CN=SuperAdmin" \
+        --dn "CN=$common_name" \
         --caname "ManagementCA" \
         --certprofile "Authentication-2048-3y" \
         --eeprofile "adminInternal" \
@@ -187,21 +190,20 @@ createSuperAdmin() {
     kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh batch
 
     # Save the CA to the CA file
-    
-    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- cat /opt/keyfactor/p12/pem/SuperAdmin-CA.pem > "$ca_filename"
+    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- cat "/opt/keyfactor/p12/pem/$common_name-CA.pem" > "$ca_filename"
 
     # Save the end entity to the end entity file
-    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- cat /opt/keyfactor/p12/pem/SuperAdmin.pem > "$end_entity_filename"
+    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- cat "/opt/keyfactor/p12/pem/$common_name.pem" > "$end_entity_filename"
 
     # Save the end entity key to the end entity key file
-    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- cat /opt/keyfactor/p12/pem/SuperAdmin-Key.pem > "$end_entity_key_filename"
+    kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- cat "/opt/keyfactor/p12/pem/$common_name-Key.pem" > "$end_entity_key_filename"
 
     # Add a role to allow the SuperAdmin to access the node
     kubectl -n "$cluster_namespace" exec -it "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh roles addrolemember \
         --role 'Super Administrator Role' \
         --caname 'ManagementCA' \
         --with 'WITH_COMMONNAME' \
-        --value 'SuperAdmin'
+        --value "$common_name"
 }
 
 # Enrolls a certificate for server TLS use
@@ -255,6 +257,8 @@ testEjbcaConnection() {
     local client_certificate_path=$2
     local client_key_path=$3
     local ca_certificate_path=$4
+
+    echo "curl --silent --fail --cert $client_certificate_path --key $client_key_path --cacert $ca_certificate_path https://$hostname/ejbca/ejbca-rest-api/v1/certificate/status" > testconn.sh
 
     curl \
         --silent --fail \

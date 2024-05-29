@@ -1,0 +1,29 @@
+{{- if .Values.ejbca.ingress.enabled -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ .Values.ejbca.ingress.name }}-insecure
+  labels:
+    {{- include "ejbca.labels" . | nindent 4 }}
+  {{- with .Values.ejbca.ingress.insecureAnnotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  ingressClassName: {{ .Values.ejbca.ingress.className }}
+  rules:
+    {{- range .Values.ejbca.ingress.insecureHosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+        {{- range .paths }}
+        - path: {{ .path }}
+          pathType: {{ .pathType }}
+          backend:
+            service:
+              name: {{ .serviceName }}
+              port:
+                name: {{ .portName }}
+        {{- end }}
+    {{- end }}
+{{- end }}

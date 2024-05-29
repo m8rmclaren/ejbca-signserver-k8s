@@ -10,11 +10,12 @@ ejbca:
   podAnnotations: {}
 
   image:
-    repository: keyfactor/ejbca-ce
-    pullPolicy: Always
+    repository: keyfactor.jfrog.io/dev-oci/ejbca/ejbca/images/ejbca-ee
+    pullPolicy: IfNotPresent
     # Overrides the image tag whose default is the chart appVersion.
     tag: "latest"
-    imagePullSecrets: []
+    imagePullSecrets:
+      - name: regcred
 
   containerPorts:
     - name: ejbca-http
@@ -48,13 +49,16 @@ ejbca:
     name: ejbca-ingress
     className: "nginx"
     annotations:
-      nginx.ingress.kubernetes.io/auth-tls-verify-client: "on"
+      nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional"
       nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
       nginx.ingress.kubernetes.io/auth-tls-secret: ejbca/ejbca-ingress-auth
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
       nginx.ingress.kubernetes.io/configuration-snippet: |
         proxy_set_header SSL_CLIENT_CERT $ssl_client_cert;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    insecureAnnotations:
+      nginx.ingress.kubernetes.io/ssl-redirect: "false"
+      nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
     hosts:
       - host: ejbca-node1.test
         tlsSecretName: ejbca-ingress-tls
@@ -63,38 +67,18 @@ ejbca:
             pathType: Prefix
             serviceName: ejbca-service
             portName: ejbca-https
+    insecureHosts:
+      - host: ejbca-node1.test
+        paths:
+          - path: /ejbca/publicweb
+            pathType: Prefix
+            serviceName: ejbca-service
+            portName: ejbca-http
 
-  volumes:
-    - name: ejbca-eep-admininternal
-      configMapName: ejbca-eep-admininternal
-      mountPath: /opt/keyfactor/stage/admininternal
-    - name: ejbca-eep-ephemeral
-      configMapName: ejbca-eep-ephemeral
-      mountPath: /opt/keyfactor/stage/ephemeral
-    - name: ejbca-eep-k8sendentity
-      configMapName: ejbca-eep-k8sendentity
-      mountPath: /opt/keyfactor/stage/k8sendentity
-    - name: ejbca-eep-userauthentication
-      configMapName: ejbca-eep-userauthentication
-      mountPath: /opt/keyfactor/stage/userauthentication
-    - name: ejbca-eep-tlsserveranyca
-      configMapName: ejbca-eep-tlsserveranyca
-      mountPath: /opt/keyfactor/stage/tlsserveranyca
-    - name: ejbca-cp-codesign1y
-      configMapName: ejbca-cp-codesign1y
-      mountPath: /opt/keyfactor/stage/codesign1y
-    - name: ejbca-cp-istioauth3d
-      configMapName: ejbca-cp-istioauth3d
-      mountPath: /opt/keyfactor/stage/istioauth3d
-    - name: ejbca-cp-tlsclientauth
-      configMapName: ejbca-cp-tlsclientauth
-      mountPath: /opt/keyfactor/stage/tlsclientauth
-    - name: ejbca-cp-tlsserverauth
-      configMapName: ejbca-cp-tlsserverauth
-      mountPath: /opt/keyfactor/stage/tlsserverauth
-    - name: ejbca-cp-auth20483y
-      configMapName: ejbca-cp-auth20483y
-      mountPath: /opt/keyfactor/stage/auth20483y
+  volumes: []
+    # - name: ejbca-eep-admininternal
+    #   configMapName: ejbca-eep-admininternal
+    #   mountPath: /opt/keyfactor/stage/admininternal
 
 database:
   replicaCount: 1
@@ -149,3 +133,4 @@ nodeSelector: {}
 tolerations: []
 
 affinity: {}
+

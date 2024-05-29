@@ -4,10 +4,14 @@ source ./ejbca.sh
 source ./k8s.sh
 
 # Use parameter expansion to provide default values.
-: "${EJBCA_NAMESPACE:=ejbca}"
-: "${EJBCA_INGRESS_HOSTNAME:=localhost}"
-: "${SIGNSERVER_NAMESPACE:=signserver}"
-: "${SIGNSERVER_INGRESS_HOSTNAME:=localhost}"
+EJBCA_NAMESPACE=ejbca
+EJBCA_INGRESS_HOSTNAME=localhost
+SIGNSERVER_NAMESPACE=signserver
+SIGNSERVER_INGRESS_HOSTNAME=localhost
+
+EJBCA_IMAGE="keyfactor/ejbca-ce"
+EJBCA_TAG="latest"
+IMAGE_PULL_SECRET_NAME=""
 
 # Clean up the filesystem for a clean install
 cleanFilesystem() {
@@ -67,6 +71,12 @@ isEjbcaAlreadyDeployed() {
     fi
 }
 
+configmapNameFromFilename() {
+    local filename=$1
+    echo "$(basename "$filename" | tr _ - | tr '[:upper:]' '[:lower:]')"
+    # echo "$(basename "$filename" | sed 's/\.[^.]*$//' | tr _ -)"
+}
+
 # Initialize the cluster for EJBCA
 initClusterForEJBCA() {
     # Create the EJBCA namespace if it doesn't already exist
@@ -74,28 +84,48 @@ initClusterForEJBCA() {
         kubectl create namespace "$EJBCA_NAMESPACE"
     fi
 
-    # Create configmaps containing end entity creation definitions
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-eep-admininternal" "./ejbca/staging/entityprofile_adminInternal-151490904.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-eep-ephemeral" "./ejbca/staging/entityprofile_ephemeral-9725769.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-eep-k8sendentity" "./ejbca/staging/entityprofile_k8s-285521485.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-eep-userauthentication" "./ejbca/staging/entityprofile_userAuthentication-1804366791.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-eep-tlsserveranyca" "./ejbca/staging/entityprofile_tlsServerAnyCA-327363278.xml"
-
-    # Create configmaps containing certificate profile creation definitions
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-cp-codesign1y" "./ejbca/staging/certprofile_codeSigning-1y-1271968915.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-cp-istioauth3d" "./ejbca/staging/certprofile_istioAuth-3d-781718050.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-cp-tlsclientauth" "./ejbca/staging/certprofile_tlsClientAuth-1615825638.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-cp-tlsserverauth" "./ejbca/staging/certprofile_tlsServerAuth-1841776707.xml"
-    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-cp-auth20483y" "./ejbca/staging/certprofile_Authentication-2048-3y-1510586178.xml"
+    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
+        configmapname="$(basename "$file")"
+        createConfigmapFromFile "$EJBCA_NAMESPACE" "$(configmapNameFromFilename "$configmapname")" "$file"
+    done
 }
 
 # Initialze the database by spinning up an instance of EJBCA infront of a MariaDB database, and
 # create the CA hierarchy and import boilerplate profiles.
 initEJBCADatabase() {
-    # Package and deploy the EJBCA helm chart with ingress disabled
-    helm package ejbca --version 1.0.0
-    helm --namespace "$EJBCA_NAMESPACE" install ejbca-node1 ejbca-1.0.0.tgz \
-        --set ejbca.ingress.enabled=false
+    helm_install_args=(
+        "--namespace" 
+        "$EJBCA_NAMESPACE" 
+        "install" 
+        "ejbca-node1" 
+        "./ejbca" 
+        "--set" 
+        "ejbca.ingress.enabled=false"
+    )
+
+    container_staging_dir="/opt/keyfactor/stage"
+    index=0
+    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
+        configMapName="$(configmapNameFromFilename "$file")"
+        volume_name="$(echo "$configMapName" | sed 's/\.[^.]*$//')"
+
+        helm_install_args+=("--set" "ejbca.volumes[$index].name=$volume_name")
+        helm_install_args+=("--set" "ejbca.volumes[$index].configMapName=$configMapName")
+        helm_install_args+=("--set" "ejbca.volumes[$index].mountPath=$container_staging_dir/$configMapName")
+        index=$((index + 1))
+    done
+
+    helm_install_args+=("--set" "ejbca.image.repository=$EJBCA_IMAGE")
+    helm_install_args+=("--set" "ejbca.image.tag=$EJBCA_TAG")
+    if [ ! -z "$IMAGE_PULL_SECRET_NAME" ]; then
+        helm_install_args+=("--set" "ejbca.image.pullSecrets[0].name=$IMAGE_PULL_SECRET_NAME")
+    fi
+
+    if ! helm "${helm_install_args[@]}" ; then
+        echo "Failed to install EJBCA"
+        kubectl delete namespace "$EJBCA_NAMESPACE"
+        exit 1
+    fi
 
     # Wait for the EJBCA Pod to be ready
     echo "Waiting for EJBCA Pod to be ready"
@@ -126,13 +156,16 @@ initEJBCADatabase() {
     createSubCA "$EJBCA_NAMESPACE" "$ejbca_pod_name" "Sub-CA" "Root-CA"
 
     # Import end entity profiles from staging area
-    importStagedEndEntityProfiles "$EJBCA_NAMESPACE" "$ejbca_pod_name"
+    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
+        configMapName="$(configmapNameFromFilename "$file")"
+        importStagedEndEntityProfile "$EJBCA_NAMESPACE" "$ejbca_pod_name" "$container_staging_dir/$configMapName"
+    done
 
     # Enable REST API
     kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh config protocols enable --name "REST Certificate Management"
 
     # Create the SuperAdmin user and get its certificate
-    createSuperAdmin "$EJBCA_NAMESPACE" "$ejbca_pod_name" "management_ca.pem" "superadmin.pem" "superadmin.key"
+    createSuperAdmin "$EJBCA_NAMESPACE" "$ejbca_pod_name" "$EJBCA_INGRESS_HOSTNAME-SuperAdmin" "management_ca.pem" "superadmin.pem" "superadmin.key"
 
     # Create a TLS certificate for ingress
     createServerCertificate "$EJBCA_NAMESPACE" "$ejbca_pod_name" "$EJBCA_INGRESS_HOSTNAME" "Sub-CA"
@@ -153,15 +186,35 @@ initEJBCADatabase() {
 # Deploy EJBCA with ingress enabled
 deployEJBCA() {
     # Package and deploy the EJBCA helm chart with ingress enabled
-    helm package ejbca --version 1.0.0
-    helm --namespace "$EJBCA_NAMESPACE" install ejbca-node1 ejbca-1.0.0.tgz \
-        --set "ejbca.ingress.enabled=true" \
-        --set "ejbca.ingress.hosts[0].host=$EJBCA_INGRESS_HOSTNAME" \
-        --set "ejbca.ingress.hosts[0].tlsSecretName=ejbca-ingress-tls" \
-        --set "ejbca.ingress.hosts[0].paths[0].path=/ejbca/" \
-        --set "ejbca.ingress.hosts[0].paths[0].pathType=Prefix" \
-        --set "ejbca.ingress.hosts[0].paths[0].serviceName=ejbca-service" \
-        --set "ejbca.ingress.hosts[0].paths[0].portName=ejbca-https"
+    helm_install_args=(
+        "--namespace" 
+        "$EJBCA_NAMESPACE" 
+        "install" 
+        "ejbca-node1" 
+        "./ejbca" 
+        "--set" 
+        "ejbca.ingress.enabled=false"
+    )
+    helm_install_args+=("--set" "ejbca.ingress.enabled=true")
+    helm_install_args+=("--set" "ejbca.ingress.hosts[0].host=$EJBCA_INGRESS_HOSTNAME")
+    helm_install_args+=("--set" "ejbca.ingress.hosts[0].tlsSecretName=ejbca-ingress-tls")
+    helm_install_args+=("--set" "ejbca.ingress.hosts[0].paths[0].path=/ejbca/")
+    helm_install_args+=("--set" "ejbca.ingress.hosts[0].paths[0].pathType=Prefix")
+    helm_install_args+=("--set" "ejbca.ingress.hosts[0].paths[0].serviceName=ejbca-service")
+    helm_install_args+=("--set" "ejbca.ingress.hosts[0].paths[0].portName=ejbca-https")
+    helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].host=$EJBCA_INGRESS_HOSTNAME")
+    helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].path=/ejbca/publicweb/")
+    helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].pathType=Prefix")
+    helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].serviceName=ejbca-service")
+    helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].portName=ejbca-http")
+
+    helm_install_args+=("--set" "ejbca.image.repository=$EJBCA_IMAGE")
+    helm_install_args+=("--set" "ejbca.image.tag=$EJBCA_TAG")
+    if [ ! -z "$IMAGE_PULL_SECRET_NAME" ]; then
+        helm_install_args+=("--set" "ejbca.image.pullSecrets[0].name=$IMAGE_PULL_SECRET_NAME")
+    fi
+
+    helm "${helm_install_args[@]}"
     
     # Wait for the EJBCA Pod to be ready
     echo "Waiting for EJBCA Pod to be ready"
@@ -173,6 +226,14 @@ deployEJBCA() {
 
     # Wait for the EJBCA node to be ready
     waitForEJBCANode "$EJBCA_NAMESPACE" "$ejbca_pod_name"
+}
+
+# Clean up the config maps used to init the EJBCA database
+cleanupEJBCAConfigMaps() {
+    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
+        configMapName="$(configmapNameFromFilename "$file")"
+        kubectl delete configmap --namespace "$EJBCA_NAMESPACE" "$configMapName"
+    done
 }
 
 # Export variables for use in the script, and test the API connection
@@ -207,13 +268,13 @@ setupEjbcaForScript() {
 }
 
 uninstallEJBCA() {
-    if [ "$(kubectl get namespace -o json | jq -e '.items[] | select(.metadata.name == "'"$EJBCA_NAMESPACE"'") | .metadata.name' | tr -d '"')" == "$EJBCA_NAMESPACE" ]; then
-        # Uninstall the EJBCA helm chart
-        helm --namespace "$EJBCA_NAMESPACE" uninstall ejbca-node1
-
-        # Delete the EJBCA namespace
-        kubectl delete namespace "$EJBCA_NAMESPACE"
+    if ! isEjbcaAlreadyDeployed; then
+        echo "EJBCA is not deployed"
+        return 1
     fi
+
+    helm --namespace "$EJBCA_NAMESPACE" uninstall ejbca-node1
+
 }
 
 ###############################################
@@ -266,18 +327,27 @@ initSignServer() {
 }
 
 uninstallSignServer() {
-    if [ "$(kubectl get namespace -o json | jq -e '.items[] | select(.metadata.name == "'"$SIGNSERVER_NAMESPACE"'") | .metadata.name' | tr -d '"')" == "$SIGNSERVER_NAMESPACE" ]; then
-        # Uninstall the SignServer helm chart
-        helm --namespace "$SIGNSERVER_NAMESPACE" uninstall signserver-node1
-
-        # Delete the SignServer namespace
-        kubectl delete namespace "$SIGNSERVER_NAMESPACE"
+    if ! isSignServerAlreadyDeployed; then
+        echo "SignServer is not deployed"
+        return 1
     fi
+
+    helm --namespace "$SIGNSERVER_NAMESPACE" uninstall signserver-node1
 }
 
 ###############################################
 # Helper Functions                            #
 ###############################################
+
+mariadbPvcExists() {
+    local namespace=$1
+
+    if [ "$(kubectl --namespace "$namespace" get pvc -l app.kubernetes.io/name=mariadb -o json | jq '.items[] | select(.metadata.labels."app.kubernetes.io/name" == "mariadb") | .metadata.name' | tr -d '"')" != "" ]; then
+        return 0
+    else
+        return 1
+    fi
+}
 
 createEnvFile() {
     # Create an environment file that can be used to connect to the EJBCA instance
@@ -350,8 +420,12 @@ usage() {
     echo "Usage: $0 [options...]"
     echo "Options:"
     echo "  --ejbca-hostname <hostname>        Set the hostname for the EJBCA node. Defaults to localhost"
-    echo "  --signserver-hostname <hostname>   Set the hostname for the signserver node. Defaults to localhost"
+    echo "  --ejbca-image <image>              Set the image to use for the EJBCA node. Defaults to keyfactor/ejbca-ce"
+    echo "  --ejbca-tag <tag>                  Set the tag to use for the EJBCA node. Defaults to latest"
+    echo "  --image-pull-secret <secret>       Use a particular image pull secret in the ejbca namespace for the EJBCA node. Defaults to none"
     echo "  --ejbca-namespace <namespace>      Set the namespace to deploy the EJBCA node in. Defaults to ejbca"
+    echo "  --no-signserver                    Skip deploying SignServer"
+    echo "  --signserver-hostname <hostname>   Set the hostname for the signserver node. Defaults to localhost"
     echo "  --signserver-namespace <namespace> Set the namespace to deploy the signserver node in. Defaults to signserver"
     echo "  --uninstall                        Uninstall EJBCA and SignServer"
     echo "  -h, --help                         Show this help message"
@@ -363,6 +437,9 @@ verifySupported
 
 # Ensure a fresh install
 cleanFilesystem
+
+# Locals
+install_signserver=true
 
 # Parse command line arguments
 while [[ $# -gt 0 ]]; do
@@ -376,6 +453,25 @@ while [[ $# -gt 0 ]]; do
             EJBCA_NAMESPACE="$2"
             shift # past argument
             shift # past value
+            ;;
+        --ejbca-image)
+            EJBCA_IMAGE="$2"
+            shift # past argument
+            shift # past value
+            ;;
+        --ejbca-tag)
+            EJBCA_TAG="$2"
+            shift # past argument
+            shift # past value
+            ;;
+        --image-pull-secret)
+            IMAGE_PULL_SECRET_NAME="$2"
+            shift # past argument
+            shift # past value
+            ;;
+        --no-signserver)
+            install_signserver=false
+            shift # past argument
             ;;
         --signserver-hostname)
             signserver_hostname="$2"
@@ -405,7 +501,12 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Figure out if the cluster is already initialized for EJBCA
-if ! isEjbcaAlreadyDeployed ; then
+if mariadbPvcExists "$EJBCA_NAMESPACE"; then
+    echo "The EJBCA database has already been configured - skipping database initialization"
+
+    # Deploy EJBCA with ingress enabled
+    deployEJBCA
+elif ! isEjbcaAlreadyDeployed ; then
     # Prepare the cluster for EJBCA
     initClusterForEJBCA
 
@@ -417,6 +518,7 @@ if ! isEjbcaAlreadyDeployed ; then
     deployEJBCA
 fi
 
+
 if ! setupEjbcaForScript ; then
     echo "EJBCA setup is incomplete"
     exit 1
@@ -427,15 +529,17 @@ fi
 # Create an environment file that can be used to connect to the EJBCA instance
 createEnvFile
 
-if ! isSignServerAlreadyDeployed ; then
-    # Prepare the cluster for SignServer
-    initClusterForSignServer
+if install_signserver ; then
+    if ! isSignServerAlreadyDeployed ; then
+        # Prepare the cluster for SignServer
+        initClusterForSignServer
 
-    # Deploy SignServer
-    deploySignServer
+        # Deploy SignServer
+        deploySignServer
+    fi
+    
+    addSignServerValuesToEnvFile
 fi
-
-addSignServerValuesToEnvFile
 
 # Print instructions to the user on how to use the environment file and how to connect to EJBCA
 printInstructions

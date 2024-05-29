@@ -14,3 +14,4 @@
 
 # Deployment artifacts
 ejbca.env
+testconn.sh
