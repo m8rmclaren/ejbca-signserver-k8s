@@ -59,6 +59,10 @@ spec:
               value: "{{ .Values.ejbca.proxyHttpBind }}"
             - name: LOG_AUDIT_TO_DB
               value: "{{ .Values.ejbca.logAuditToDatabase }}"
+            {{ if .Values.ejbca.ingress.enabled }}
+            - name: HTTPSERVER_HOSTNAME
+              value: "{{ index .Values.ejbca.ingress.hosts 0 "host" }}"
+            {{ end }}
             # - name: INITIAL_ADMIN
             #   value: {{ .Values.ejbca.initialAdmin }}
             - name: TLS_SETUP_ENABLED
