@@ -67,6 +67,12 @@ spec:
             #   value: {{ .Values.ejbca.initialAdmin }}
             - name: TLS_SETUP_ENABLED
               value: "simple"
+            {{ if .Values.ejbca.extraEnvironmentVars }}
+            {{- range .Values.ejbca.extraEnvironmentVars }}
+            - name: {{ .name }}
+              value: {{ .value }}
+            {{- end }}
+            {{- end }}
           volumeMounts:
           {{- range .Values.ejbca.volumes }}
             - name: {{ .name }}
