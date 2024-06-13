@@ -51,7 +51,7 @@ ejbca:
       pullPolicy: IfNotPresent
       tag: "2.4"
 
-    authCASecretName: ejbca-ingress-auth
+    authCASecretName: managementca
     tlsSecretName: ejbca-ingress-tls
     targetEjbcaPort: 8082
 
@@ -76,7 +76,7 @@ ejbca:
     annotations:
       nginx.ingress.kubernetes.io/auth-tls-verify-client: "optional"
       nginx.ingress.kubernetes.io/auth-tls-pass-certificate-to-upstream: "true"
-      nginx.ingress.kubernetes.io/auth-tls-secret: ejbca/ejbca-ingress-auth
+      nginx.ingress.kubernetes.io/auth-tls-secret: ejbca/managementca
       nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
       nginx.ingress.kubernetes.io/configuration-snippet: |
         proxy_set_header SSL_CLIENT_CERT $ssl_client_cert;
@@ -104,6 +104,10 @@ ejbca:
     # - name: ejbca-eep-admininternal
     #   configMapName: ejbca-eep-admininternal
     #   mountPath: /opt/keyfactor/stage/admininternal
+
+  extraEnvironmentVars: []
+  # - name: EJBCA_EXTRA_ENV
+  #   value: "EJBCA_EXTRA_ENV"
 
 database:
   replicaCount: 1

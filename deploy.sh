@@ -1,9 +1,8 @@
-#! /bin/bash
+#!/bin/bash
 
 source ./ejbca.sh
 source ./k8s.sh
 
-# Use parameter expansion to provide default values.
 EJBCA_NAMESPACE=ejbca
 EJBCA_INGRESS_HOSTNAME=localhost
 EJBCA_IMAGE="keyfactor/ejbca-ce"
@@ -15,6 +14,9 @@ SIGNSERVER_IMAGE="keyfactor/ejbca-ce"
 SIGNSERVER_TAG="latest"
 
 IMAGE_PULL_SECRET_NAME=""
+
+EJBCA_ROOT_CA_NAME="Root-CA"
+EJBCA_SUB_CA_NAME="Sub-CA"
 
 # Clean up the filesystem for a clean install
 cleanFilesystem() {
@@ -74,10 +76,24 @@ isEjbcaAlreadyDeployed() {
     fi
 }
 
+# Waits for the EJBCA node to be ready
+# cluster_namespace - The namespace where the EJBCA node is running
+# ejbca_pod_name - The name of the Pod running the EJBCA node
+waitForEJBCANode() {
+    local cluster_namespace=$1
+    local ejbca_pod_name=$2
+
+    echo "Waiting for EJBCA node to be ready"
+    until ! kubectl -n "$cluster_namespace" exec "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh 2>&1 | grep -q "could not contact EJBCA"; do
+        echo "EJBCA node not ready yet, retrying in 5 seconds..."
+        sleep 5
+    done
+    echo "EJBCA node $cluster_namespace/$ejbca_pod_name is ready."
+}
+
 configmapNameFromFilename() {
     local filename=$1
     echo "$(basename "$filename" | tr _ - | tr '[:upper:]' '[:lower:]')"
-    # echo "$(basename "$filename" | sed 's/\.[^.]*$//' | tr _ -)"
 }
 
 # Initialize the cluster for EJBCA
@@ -87,9 +103,21 @@ initClusterForEJBCA() {
         kubectl create namespace "$EJBCA_NAMESPACE"
     fi
 
+    # Mount the staged EEPs & CPs to Kubernetes with ConfigMaps
     for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
         configmapname="$(basename "$file")"
         createConfigmapFromFile "$EJBCA_NAMESPACE" "$(configmapNameFromFilename "$configmapname")" "$file"
+    done
+
+    # Mount the ejbca init script to Kubernetes using a ConigMap
+    createConfigmapFromFile "$EJBCA_NAMESPACE" "ejbca-init" "./ejbca/scripts/ejbca-init.sh"
+}
+
+# Clean up the config maps used to init the EJBCA database
+cleanupEJBCAConfigMaps() {
+    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
+        configMapName="$(configmapNameFromFilename "$file")"
+        kubectl delete configmap --namespace "$EJBCA_NAMESPACE" "$configMapName"
     done
 }
 
@@ -102,8 +130,7 @@ initEJBCADatabase() {
         "install" 
         "ejbca-node1" 
         "./ejbca" 
-        "--set" 
-        "ejbca.ingress.enabled=false"
+        "--set" "ejbca.ingress.enabled=false"
     )
 
     container_staging_dir="/opt/keyfactor/stage"
@@ -117,6 +144,25 @@ initEJBCADatabase() {
         helm_install_args+=("--set" "ejbca.volumes[$index].mountPath=$container_staging_dir/$configMapName")
         index=$((index + 1))
     done
+
+    helm_install_args+=("--set" "ejbca.volumes[$index].name=ejbca-init")
+    helm_install_args+=("--set" "ejbca.volumes[$index].configMapName=ejbca-init")
+    helm_install_args+=("--set" "ejbca.volumes[$index].mountPath=/tmp/")
+
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[0].name=EJBCA_INGRESS_HOSTNAME")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[0].value=$EJBCA_INGRESS_HOSTNAME")
+
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[1].name=EJBCA_INGRESS_SECRET_NAME")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[1].value=ejbca-ingress-tls")
+
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[2].name=EJBCA_SUPERADMIN_COMMONNAME")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[2].value=$EJBCA_INGRESS_HOSTNAME-SuperAdmin")
+
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[3].name=EJBCA_ROOT_CA_NAME")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[3].value=$EJBCA_ROOT_CA_NAME")
+
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[4].name=EJBCA_SUB_CA_NAME")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[4].value=$EJBCA_SUB_CA_NAME")
 
     helm_install_args+=("--set" "ejbca.image.repository=$EJBCA_IMAGE")
     helm_install_args+=("--set" "ejbca.image.tag=$EJBCA_TAG")
@@ -141,49 +187,20 @@ initEJBCADatabase() {
     # Wait for the EJBCA Pod to be ready
     waitForEJBCANode "$EJBCA_NAMESPACE" "$ejbca_pod_name"
 
-    # Create token properties file
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- sh -c 'touch /opt/keyfactor/token.properties'
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- sh -c 'echo "certSignKey signKey" >> /opt/keyfactor/token.properties'
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- sh -c 'echo "crlSignKey signKey" >> /opt/keyfactor/token.properties'
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- sh -c 'echo "keyEncryptKey encryptKey" >> /opt/keyfactor/token.properties'
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- sh -c 'echo "testKey testKey" >> /opt/keyfactor/token.properties'
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- sh -c 'echo "defaultKey encryptKey" >> /opt/keyfactor/token.properties'
-
-    # Create ManagementCA
-    createRootCA "$EJBCA_NAMESPACE" "$ejbca_pod_name" "ManagementCA" "/opt/keyfactor/token.properties"
-
-    # Create Root-CA
-    createRootCA "$EJBCA_NAMESPACE" "$ejbca_pod_name" "Root-CA" "/opt/keyfactor/token.properties"
-
-    # Create Sub-CA
-    createSubCA "$EJBCA_NAMESPACE" "$ejbca_pod_name" "Sub-CA" "Root-CA"
-
-    # Import end entity profiles from staging area
-    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
-        configMapName="$(configmapNameFromFilename "$file")"
-        importStagedEndEntityProfile "$EJBCA_NAMESPACE" "$ejbca_pod_name" "$container_staging_dir/$configMapName"
-    done
-
-    # Enable REST API
-    kubectl --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" -- /opt/keyfactor/bin/ejbca.sh config protocols enable --name "REST Certificate Management"
-
-    # Create the SuperAdmin user and get its certificate
-    createSuperAdmin "$EJBCA_NAMESPACE" "$ejbca_pod_name" "$EJBCA_INGRESS_HOSTNAME-SuperAdmin" "management_ca.pem" "superadmin.pem" "superadmin.key"
-
-    # Create a TLS certificate for ingress
-    createServerCertificate "$EJBCA_NAMESPACE" "$ejbca_pod_name" "$EJBCA_INGRESS_HOSTNAME" "Sub-CA"
-
-    # Put the CA cert in a file for later use
-    echo -e "$SERVER_CA" > ./Sub-CA-chain.pem
-
-    # Create a TLS certificate for ingress
-    kubectl create secret tls --namespace "$EJBCA_NAMESPACE" ejbca-ingress-tls --cert=<(echo -e "$SERVER_CERTIFICATE") --key=<(echo -e "$SERVER_KEY")
-
-    # Create a secret contianing the CA cert to validate client certificates
-    kubectl create secret generic --namespace "$EJBCA_NAMESPACE" ejbca-ingress-auth --from-file=ca.crt=./management_ca.pem
+    # Execute the EJBCA init script
+    args=(
+        --namespace "$EJBCA_NAMESPACE" exec "$ejbca_pod_name" --
+        bash -c 'cp /tmp/ejbca-init.sh /opt/keyfactor/bin/ejbca-init.sh && chmod +x /opt/keyfactor/bin/ejbca-init.sh && /opt/keyfactor/bin/ejbca-init.sh'
+        )
+    if ! kubectl "${args[@]}" ; then
+        echo "Failed to execute the EJBCA init script"
+        kubectl delete ns "$EJBCA_NAMESPACE"
+        exit 1
+    fi
 
     # Uninstall the EJBCA helm chart - database is peristent
     helm --namespace "$EJBCA_NAMESPACE" uninstall ejbca-node1
+    cleanupEJBCAConfigMaps
 }
 
 # Deploy EJBCA with ingress enabled
@@ -218,7 +235,10 @@ deployEJBCA() {
         helm_install_args+=("--set" "ejbca.image.pullSecrets[0].name=$IMAGE_PULL_SECRET_NAME")
     fi
 
-    helm "${helm_install_args[@]}"
+    if ! helm "${helm_install_args[@]}" ; then
+        echo "Failed to install EJBCA"
+        exit 1
+    fi
     
     # Wait for the EJBCA Pod to be ready
     echo "Waiting for EJBCA Pod to be ready"
@@ -232,21 +252,20 @@ deployEJBCA() {
     waitForEJBCANode "$EJBCA_NAMESPACE" "$ejbca_pod_name"
 }
 
-# Clean up the config maps used to init the EJBCA database
-cleanupEJBCAConfigMaps() {
-    for file in $(find ./ejbca/staging -maxdepth 1 -mindepth 1); do
-        configMapName="$(configmapNameFromFilename "$file")"
-        kubectl delete configmap --namespace "$EJBCA_NAMESPACE" "$configMapName"
-    done
-}
-
 # Export variables for use in the script, and test the API connection
 setupEjbcaForScript() {
     EJBCA_HOSTNAME="$EJBCA_INGRESS_HOSTNAME"
-    EJBCA_CA_NAME="Sub-CA"
+    EJBCA_CA_NAME="$EJBCA_SUB_CA_NAME"
     EJBCA_CERTIFICATE_PROFILE_NAME="tlsServerAuth"
     EJBCA_END_ENTITY_PROFILE_NAME="tlsServerAnyCA"
     EJBCA_CSR_SUBJECT="CN=$EJBCA_INGRESS_HOSTNAME,OU=IT"
+
+    kubectl --namespace "$EJBCA_NAMESPACE" get secret superadmin-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > $(pwd)/superadmin.pem
+    kubectl --namespace "$EJBCA_NAMESPACE" get secret superadmin-tls -o jsonpath='{.data.tls\.key}' | base64 -d > $(pwd)/superadmin.key
+    kubectl --namespace "$EJBCA_NAMESPACE" get secret ejbca-ingress-tls -o jsonpath='{.data.tls\.crt}' | base64 -d > $(pwd)/server.pem
+    kubectl --namespace "$EJBCA_NAMESPACE" get secret ejbca-ingress-tls -o jsonpath='{.data.tls\.key}' | base64 -d > $(pwd)/server.key
+    kubectl --namespace "$EJBCA_NAMESPACE" get secret subca -o jsonpath='{.data.ca\.crt}' | base64 -d > $(pwd)/Sub-CA-chain.pem
+    kubectl --namespace "$EJBCA_NAMESPACE" get secret managementca -o jsonpath='{.data.ca\.crt}' | base64 -d > $(pwd)/managementca.pem
 
     EJBCA_CLIENT_CERT_PATH="$(pwd)/superadmin.pem"
     EJBCA_CLIENT_KEY_PATH="$(pwd)/superadmin.key"
@@ -304,11 +323,11 @@ initClusterForSignServer() {
 deploySignServer() {
     # Enroll for a TLS certificate to use for the SignServer ingress
     enrollPkcs10Certificate "$EJBCA_HOSTNAME" "$EJBCA_CLIENT_CERT_PATH" "$EJBCA_CLIENT_KEY_PATH" "$EJBCA_CA_CERT_PATH" "Sub-CA" "$SIGNSERVER_INGRESS_HOSTNAME"
-    kubectl create secret tls --namespace "$SIGNSERVER_NAMESPACE" signserver-ingress-tls --cert=<(echo -e "$PKCS10_CERTIFICATE") --key=<(echo -e "$PKCS10_KEY")
+    kubectl create secret tls --namespace "$SIGNSERVER_NAMESPACE" signserver-ingress-tls --cert=server.pem --key=server.key
 
     # Create a secret contianing the CA cert to validate client certificates
-    kubectl create secret generic --namespace "$SIGNSERVER_NAMESPACE" signserver-ingress-auth --from-file=ca.crt=./management_ca.pem
-    kubectl create configmap --namespace "$SIGNSERVER_NAMESPACE" signserver-trusted-ca --from-file=ManagementCA.crt=./management_ca.pem
+    kubectl create secret generic --namespace "$SIGNSERVER_NAMESPACE" managementca --from-file=ca.crt=./managementca.pem
+    kubectl create configmap --namespace "$SIGNSERVER_NAMESPACE" signserver-trusted-ca --from-file=ManagementCA.crt=./managementca.pem
 
     helm_install_args=(
         "--namespace" 
@@ -415,7 +434,7 @@ printInstructions() {
         echo "2. Import the client certificate into your keychain"
         echo "   a. Export the certificate to PFX format"
         echo "      - On Mac/Linux, use the following command:"
-        echo "        openssl pkcs12 -export -in superadmin.pem -inkey superadmin.key --CAfile management_ca.pem -out superadmin.pfx -chain -legacy"
+        echo "        openssl pkcs12 -export -in superadmin.pem -inkey superadmin.key --CAfile managementca.pem -out superadmin.pfx -chain -legacy"
         echo "   b. Import the PFX file into your keychain - usually by double clicking the file. Make sure that the CA is marked as trusted if on a Mac."
         echo ""
         echo "3. Open a browser and navigate to https://$EJBCA_INGRESS_HOSTNAME/ejbca/adminweb/"
@@ -546,7 +565,7 @@ fi
 # Create an environment file that can be used to connect to the EJBCA instance
 createEnvFile
 
-if install_signserver ; then
+if [ "$install_signserver" = true ]; then
     if ! isSignServerAlreadyDeployed ; then
         # Prepare the cluster for SignServer
         initClusterForSignServer
