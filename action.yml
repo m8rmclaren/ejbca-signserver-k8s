@@ -50,7 +50,6 @@ runs:
       shell: bash
       run: |
         cd ejbca-signserver-k8s
-        
         ./deploy.sh
 
     - name: Source environment variables for EJBCA and SignServer

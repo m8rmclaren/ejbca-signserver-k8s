@@ -74,12 +74,44 @@ spec:
           {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
+        {{- if .Values.ejbca.reverseProxy.enabled }}
+        - name: httpd
+          image: "{{ .Values.ejbca.reverseProxy.image.repository }}:{{ .Values.ejbca.reverseProxy.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.ejbca.reverseProxy.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+          readinessProbe:
+            tcpSocket:
+              port: 8080
+          volumeMounts:
+            - name: httpd-configmap
+              mountPath: /usr/local/apache2/conf/
+            - name: reverse-proxy-tls
+              mountPath: /usr/local/certs
+            - name: cert-auth-ca
+              mountPath: /usr/local/cacerts
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+        {{- end }}
       volumes:
       {{- range .Values.ejbca.volumes }}
         - name: {{ .name }}
           configMap: 
             name: {{ .configMapName }}
       {{- end }}
+      {{- if .Values.ejbca.reverseProxy.enabled }}
+        - name: httpd-configmap
+          configMap: 
+            name: httpd-configmap
+        - name: reverse-proxy-tls
+          secret:
+            secretName: {{ .Values.ejbca.reverseProxy.tlsSecretName }}
+        - name: cert-auth-ca
+          secret:
+            secretName: {{ .Values.ejbca.reverseProxy.authCASecretName }}
+      {{- end}}
       {{- with .Values.nodeSelector }}
       nodeSelector:
         {{- toYaml . | nindent 8 }}

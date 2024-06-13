@@ -6,11 +6,14 @@ source ./k8s.sh
 # Use parameter expansion to provide default values.
 EJBCA_NAMESPACE=ejbca
 EJBCA_INGRESS_HOSTNAME=localhost
-SIGNSERVER_NAMESPACE=signserver
-SIGNSERVER_INGRESS_HOSTNAME=localhost
-
 EJBCA_IMAGE="keyfactor/ejbca-ce"
 EJBCA_TAG="latest"
+
+SIGNSERVER_NAMESPACE=signserver
+SIGNSERVER_INGRESS_HOSTNAME=localhost
+SIGNSERVER_IMAGE="keyfactor/ejbca-ce"
+SIGNSERVER_TAG="latest"
+
 IMAGE_PULL_SECRET_NAME=""
 
 # Clean up the filesystem for a clean install
@@ -207,6 +210,7 @@ deployEJBCA() {
     helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].pathType=Prefix")
     helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].serviceName=ejbca-service")
     helm_install_args+=("--set" "ejbca.ingress.insecureHosts[0].paths[0].portName=ejbca-http")
+    helm_install_args+=("--set" "ejbca.reverseProxy.enabled=true")
 
     helm_install_args+=("--set" "ejbca.image.repository=$EJBCA_IMAGE")
     helm_install_args+=("--set" "ejbca.image.tag=$EJBCA_TAG")
@@ -306,16 +310,29 @@ deploySignServer() {
     kubectl create secret generic --namespace "$SIGNSERVER_NAMESPACE" signserver-ingress-auth --from-file=ca.crt=./management_ca.pem
     kubectl create configmap --namespace "$SIGNSERVER_NAMESPACE" signserver-trusted-ca --from-file=ManagementCA.crt=./management_ca.pem
 
-    # Package and deploy the SignServer helm chart with ingress enabled
-    helm package signserver --version 1.0.0
-    helm --namespace "$SIGNSERVER_NAMESPACE" install signserver-node1 signserver-1.0.0.tgz \
-        --set "signserver.ingress.enabled=true" \
-        --set "signserver.ingress.hosts[0].host=$SIGNSERVER_INGRESS_HOSTNAME" \
-        --set "signserver.ingress.hosts[0].tlsSecretName=signserver-ingress-tls" \
-        --set "signserver.ingress.hosts[0].paths[0].path=/signserver/" \
-        --set "signserver.ingress.hosts[0].paths[0].pathType=Prefix" \
-        --set "signserver.ingress.hosts[0].paths[0].serviceName=signserver-service" \
-        --set "signserver.ingress.hosts[0].paths[0].portName=https"
+    helm_install_args=(
+        "--namespace" 
+        "$SIGNSERVER_NAMESPACE" 
+        "install" 
+        "signserver-node1" 
+        "./signserver" 
+    )
+    helm_install_args+=("--set" "signserver.ingress.enabled=true")
+    helm_install_args+=("--set" "signserver.ingress.enabled=true")
+    helm_install_args+=("--set" "signserver.ingress.hosts[0].host=$SIGNSERVER_INGRESS_HOSTNAME")
+    helm_install_args+=("--set" "signserver.ingress.hosts[0].tlsSecretName=signserver-ingress-tls")
+    helm_install_args+=("--set" "signserver.ingress.hosts[0].paths[0].path=/signserver/")
+    helm_install_args+=("--set" "signserver.ingress.hosts[0].paths[0].pathType=Prefix")
+    helm_install_args+=("--set" "signserver.ingress.hosts[0].paths[0].serviceName=signserver-service")
+    helm_install_args+=("--set" "signserver.ingress.hosts[0].paths[0].portName=https")
+
+    helm_install_args+=("--set" "signserver.image.repository=$EJBCA_IMAGE")
+    helm_install_args+=("--set" "signserver.image.tag=$EJBCA_TAG")
+    if [ ! -z "$IMAGE_PULL_SECRET_NAME" ]; then
+        helm_install_args+=("--set" "signserver.image.pullSecrets[0].name=$IMAGE_PULL_SECRET_NAME")
+    fi
+
+    helm "${helm_install_args[@]}"
     
     # Wait for the SignServer Pod to be ready
     echo "Waiting for SignServer Pod to be ready"
