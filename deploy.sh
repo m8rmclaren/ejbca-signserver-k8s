@@ -402,7 +402,7 @@ createEnvFile() {
     echo "EJBCA_CA_NAME=Sub-CA" >> ./ejbca.env
     echo "EJBCA_CERTIFICATE_PROFILE_NAME=tlsServerAuth" >> ./ejbca.env
     echo "EJBCA_END_ENTITY_PROFILE_NAME=tlsServerAnyCA" >> ./ejbca.env
-    echo "EJBCA_CERTIFICATE_SUBJECT=CN=$EJBCA_INGRESS_HOSTNAME" >> ./ejbca.env
+    echo "EJBCA_CERTIFICATE_SUBJECT=CN=example.com" >> ./ejbca.env
     echo "EJBCA_CA_DN='CN=$EJBCA_SUB_CA_NAME,O=EJBCA'" >> ./ejbca.env
 }
 
