@@ -13,6 +13,10 @@ inputs:
     description: Whether or not to deploy NGINX Ingress Controller
     required: false
     default: 'true'
+  deploy-signserver:
+    description: Whether or not to deploy SignServer
+    required: false
+    default: 'true'
 
 runs:
   using: 'composite'
@@ -50,7 +54,11 @@ runs:
       shell: bash
       run: |
         cd ejbca-signserver-k8s
-        ./deploy.sh
+        if [ "${{ inputs.deploy-signserver }}" == 'true' ]; then
+          ./deploy.sh
+        else
+          ./deploy.sh --deploy-ejbca --no-signserver
+        fi
 
         kubectl get all -n ejbca
 
