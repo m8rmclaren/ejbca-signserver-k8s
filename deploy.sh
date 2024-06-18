@@ -389,16 +389,17 @@ createEnvFile() {
     # Create an environment file that can be used to connect to the EJBCA instance
 
     touch ./ejbca.env
-    echo "EJBCA_HOSTNAME=$EJBCA_INGRESS_HOSTNAME" >> ./ejbca.env
+    echo "EJBCA_HOSTNAME=$EJBCA_INGRESS_HOSTNAME" > ./ejbca.env
     
-    echo "EJBCA_CA_NAME=Sub-CA" >> ./ejbca.env
-    echo "EJBCA_CERTIFICATE_PROFILE_NAME=tlsServerAuth" >> ./ejbca.env
-    echo "EJBCA_END_ENTITY_PROFILE_NAME=tlsServerAnyCA" >> ./ejbca.env
-    echo "EJBCA_CSR_SUBJECT=CN=$EJBCA_INGRESS_HOSTNAME,OU=IT" >> ./ejbca.env
-
     echo "EJBCA_CLIENT_CERT_PATH=$(pwd)/superadmin.pem" >> ./ejbca.env
     echo "EJBCA_CLIENT_CERT_KEY_PATH=$(pwd)/superadmin.key" >> ./ejbca.env
     echo "EJBCA_CA_CERT_PATH=$(pwd)/Sub-CA-chain.pem" >> ./ejbca.env
+
+    echo "EJBCA_CA_NAME=Sub-CA" >> ./ejbca.env
+    echo "EJBCA_CERTIFICATE_PROFILE_NAME=tlsServerAuth" >> ./ejbca.env
+    echo "EJBCA_END_ENTITY_PROFILE_NAME=tlsServerAnyCA" >> ./ejbca.env
+    echo "EJBCA_CERTIFICATE_SUBJECT=CN=$EJBCA_INGRESS_HOSTNAME" >> ./ejbca.env
+    echo "EJBCA_CA_DN='CN=$EJBCA_SUB_CA_NAME,O=EJBCA'" >> ./ejbca.env
 }
 
 addSignServerValuesToEnvFile() {
@@ -537,21 +538,23 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Figure out if the cluster is already initialized for EJBCA
-if mariadbPvcExists "$EJBCA_NAMESPACE"; then
-    echo "The EJBCA database has already been configured - skipping database initialization"
+if ! isEjbcaAlreadyDeployed; then
+    if mariadbPvcExists "$EJBCA_NAMESPACE"; then
+        echo "The EJBCA database has already been configured - skipping database initialization"
 
-    # Deploy EJBCA with ingress enabled
-    deployEJBCA
-elif ! isEjbcaAlreadyDeployed ; then
-    # Prepare the cluster for EJBCA
-    initClusterForEJBCA
+        # Deploy EJBCA with ingress enabled
+        deployEJBCA
+    else
+        # Prepare the cluster for EJBCA
+        initClusterForEJBCA
 
-    # Initialize the database by spinning up an instance of EJBCA infront of a MariaDB database, and then
-    # create the CA hierarchy and import boilerplate profiles.
-    initEJBCADatabase
+        # Initialize the database by spinning up an instance of EJBCA infront of a MariaDB database, and then
+        # create the CA hierarchy and import boilerplate profiles.
+        initEJBCADatabase
 
-    # Deploy EJBCA with ingress enabled
-    deployEJBCA
+        # Deploy EJBCA with ingress enabled
+        deployEJBCA
+    fi
 fi
 
 
