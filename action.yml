@@ -52,6 +52,8 @@ runs:
         cd ejbca-signserver-k8s
         ./deploy.sh
 
+        kubectl get all -n ejbca
+
     - name: Source environment variables for EJBCA and SignServer
       shell: bash
       run: |
