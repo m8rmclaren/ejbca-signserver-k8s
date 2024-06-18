@@ -57,7 +57,7 @@ runs:
         if [ "${{ inputs.deploy-signserver }}" == 'true' ]; then
           ./deploy.sh
         else
-          ./deploy.sh --deploy-ejbca --no-signserver
+          ./deploy.sh --no-signserver
         fi
 
         kubectl get all -n ejbca
