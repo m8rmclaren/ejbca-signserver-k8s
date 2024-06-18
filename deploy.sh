@@ -239,10 +239,12 @@ deployEJBCA() {
         echo "Failed to install EJBCA"
         exit 1
     fi
+
+    sleep 20
     
     # Wait for the EJBCA Pod to be ready
     echo "Waiting for EJBCA Pod to be ready"
-    kubectl --namespace "$EJBCA_NAMESPACE" wait --for=condition=ready pod -l app.kubernetes.io/name=ejbca --timeout=300s
+    kubectl --namespace "$EJBCA_NAMESPACE" wait --for=condition=ready pod -l app.kubernetes.io/instance=ejbca-node1 --timeout=300s
 
     # Get the name of the EJBCA Pod
     local ejbca_pod_name
@@ -352,10 +354,12 @@ deploySignServer() {
     fi
 
     helm "${helm_install_args[@]}"
+
+    sleep 20
     
     # Wait for the SignServer Pod to be ready
     echo "Waiting for SignServer Pod to be ready"
-    kubectl --namespace "$SIGNSERVER_NAMESPACE" wait --for=condition=ready pod -l app.kubernetes.io/name=signserver --timeout=300s
+    kubectl --namespace "$SIGNSERVER_NAMESPACE" wait --for=condition=ready pod -l app.kubernetes.io/instance=signserver-node1 --timeout=300s
 }
 
 initSignServer() {
