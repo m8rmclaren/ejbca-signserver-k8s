@@ -51,23 +51,19 @@ ejbca:
       pullPolicy: IfNotPresent
       tag: "2.4"
 
-    authCASecretName: managementca
-    tlsSecretName: ejbca-ingress-tls
-    targetEjbcaPort: 8082
-
-    containerPorts:
-      - name: ejbca-reverseproxy-https
-        containerPort: 8443
-        protocol: TCP
-
     service:
       name: ejbca-rp-service
       type: ClusterIP
       ports:
         - name: ejbca-rp-https
           port: 8443
-          targetPort: ejbca-rp-https
+          targetPort: 8082
           protocol: TCP
+
+          authCASecretName: managementca
+          tlsSecretName: ejbca-reverseproxy-tls
+          baseCertDir: '/usr/local/certs'
+          baseCaCertDir: '/usr/local/cacerts'
 
   ingress:
     enabled: false

@@ -334,3 +334,40 @@ server_key="/opt/keyfactor/p12/pem/$ingress_hostname-Key.pem"
 createK8sTLSSecret "$ingress_secret_name" "$server_cert" "$server_key"
 subca_cert="/opt/keyfactor/p12/pem/$ingress_hostname-CA.pem"
 createK8sOpaqueSecret "subca" "ca.crt" "$(cat $subca_cert | base64 | tr -d '\n')"
+
+#########################################
+# Create the in-cluster TLS certificate #
+#########################################
+
+reverseproxy_fqdn="$EJBCA_CLUSTER_REVERSEPROXY_FQDN"
+if [ -z "$reverseproxy_fqdn" ]; then
+    echo "Skipping in-cluster reverse proxy TLS config - EJBCA_CLUSTER_REVERSEPROXY_FQDN not set"
+    return 0
+fi
+
+reverseproxy_secret_name="$EJBCA_RP_TLS_SECRET_NAME"
+if [ -z "$reverseproxy_secret_name" ]; then
+    echo "Using default reverseproxy secret name ejbca-reverseproxy-tls"
+    ingress_secret_name="ejbca-reverseproxy-tls"
+fi
+
+echo "Creating server certificate for $reverseproxy_fqdn"
+ejbcactl ra addendentity \
+    --username "$reverseproxy_fqdn" \
+    --altname dNSName="$reverseproxy_fqdn" \
+    --dn "CN=$reverseproxy_fqdn" \
+    --caname "Sub-CA" \
+    --certprofile "tlsServerAuth" \
+    --eeprofile "tlsServerAnyCA" \
+    --type 1 \
+    --token "PEM" \
+    --password "foo123"
+
+ejbcactl ra setclearpwd "$reverseproxy_fqdn" foo123
+ejbcactl batch
+
+ls -l "/opt/keyfactor/p12/pem"
+
+server_cert="/opt/keyfactor/p12/pem/$reverseproxy_fqdn.pem"
+server_key="/opt/keyfactor/p12/pem/$reverseproxy_fqdn-Key.pem"
+createK8sTLSSecret "$reverseproxy_secret_name" "$server_cert" "$server_key"

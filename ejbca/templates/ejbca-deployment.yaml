@@ -84,20 +84,32 @@ spec:
         - name: httpd
           image: "{{ .Values.ejbca.reverseProxy.image.repository }}:{{ .Values.ejbca.reverseProxy.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.ejbca.reverseProxy.image.pullPolicy }}
+          {{- if .Values.ejbca.reverseProxy.service.ports }}
           ports:
-            - name: http
-              containerPort: 8080
-              protocol: TCP
+          {{- range .Values.ejbca.reverseProxy.service.ports }}
+            - name: {{ .name }}
+              containerPort: {{ .port }}
+              protocol: {{ .protocol }}
+          {{- end }}
+          {{- end }}
           readinessProbe:
             tcpSocket:
               port: 8080
           volumeMounts:
             - name: httpd-configmap
               mountPath: /usr/local/apache2/conf/
-            - name: reverse-proxy-tls
-              mountPath: /usr/local/certs
-            - name: cert-auth-ca
-              mountPath: /usr/local/cacerts
+            {{- if .Values.ejbca.reverseProxy.service.ports }}
+            {{- range .Values.ejbca.reverseProxy.service.ports }}
+            {{- if .authCASecretName }}
+            - name: {{ .authCASecretName }}
+              mountPath: {{ .baseCaCertDir }}
+            {{- end }}
+            {{- if .tlsSecretName }}
+            - name: {{ .tlsSecretName }}
+              mountPath: {{ .baseCertDir }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
           resources:
             {{- toYaml .Values.resources | nindent 12 }}
         {{- end }}
@@ -111,12 +123,20 @@ spec:
         - name: httpd-configmap
           configMap: 
             name: httpd-configmap
-        - name: reverse-proxy-tls
+        {{- if .Values.ejbca.reverseProxy.service.ports }}
+        {{- range .Values.ejbca.reverseProxy.service.ports }}
+        {{- if .authCASecretName }}
+        - name: {{ .authCASecretName }}
           secret:
-            secretName: {{ .Values.ejbca.reverseProxy.tlsSecretName }}
-        - name: cert-auth-ca
+            secretName: {{ .authCASecretName }}
+        {{- end }}
+        {{- if .tlsSecretName }}
+        - name: {{ .tlsSecretName }}
           secret:
-            secretName: {{ .Values.ejbca.reverseProxy.authCASecretName }}
+            secretName: {{ .tlsSecretName }}
+        {{- end }}
+        {{- end }}
+        {{- end }}
       {{- end}}
       {{- with .Values.nodeSelector }}
       nodeSelector:

@@ -39,13 +39,17 @@ data:
 
     ServerRoot "/usr/local/apache2"
     Listen 8080
-    Listen 8443
+    {{- range .Values.ejbca.reverseProxy.service.ports }}
+    Listen {{ .port }}
+    {{- end }}
+
     <Directory />
         AllowOverride none
         Require all denied
     </Directory>
 
-    <VirtualHost *:{{ .Values.ejbca.reverseProxy.targetEjbcaPort }}>
+    {{- range .Values.ejbca.reverseProxy.service.ports }}
+    <VirtualHost *:{{ .port }}>
         # Disallow any HTTP method that is not HEAD, GET or POST
         RewriteEngine On
         RewriteCond %{REQUEST_METHOD} !^(HEAD|GET|POST)$ [NC]
@@ -54,40 +58,55 @@ data:
         # Allow encoded slashes for OCSP GET
         AllowEncodedSlashes On
 
+        {{- if .tlsSecretName }}
         SSLEngine On
         SSLProtocol all -SSLv2 -SSLv3 -TLSv1 +TLSv1.2 -TLSv1.3
-        SSLCertificateFile "/usr/local/certs/tls.crt"
-        SSLCertificateKeyFile "/usr/local/certs/tls.key"
+        SSLCertificateFile "{{ .baseCertDir }}/tls.crt"
+        SSLCertificateKeyFile "{{ .baseCertDir }}/tls.key"
+        RequestHeader set X-Forwarded-Proto "https"
+        {{- end }}
 
-        SSLCACertificateFile "/usr/local/cacerts/ca.crt"
+        {{ if .authCASecretName }}
+        SSLCACertificateFile "{{ .baseCaCertDir }}/ca.crt"
 
         <Location /ejbca/adminweb>
             SSLVerifyClient optional
             SSLOptions +ExportCertData +StdEnvVars
+            RequestHeader set SSL_CLIENT_CERT "%{SSL_CLIENT_CERT}s"
         </Location>
 
-        RequestHeader set X-Forwarded-Proto "https"
+        <Location /ejbca/ejbca-rest-api>
+            SSLVerifyClient optional
+            SSLOptions +ExportCertData +StdEnvVars
+            RequestHeader set SSL_CLIENT_CERT "%{SSL_CLIENT_CERT}s"
+        </Location>
 
-        # Proxy http requests from K8s ingress to EJBCA via port 8082
-        ProxyPass /ejbca/       http://localhost:{{ .Values.ejbca.reverseProxy.targetEjbcaPort }}/ejbca/ keepalive=On ping=500ms retry=1 timeout=300
+        <Location /ejbca/ra>
+            SSLVerifyClient optional
+            SSLOptions +ExportCertData +StdEnvVars
+            RequestHeader set SSL_CLIENT_CERT "%{SSL_CLIENT_CERT}s"
+        </Location>
+        {{- end }}
+
+        ProxyPass /ejbca/       http://localhost:{{ .targetPort }}/ejbca/ keepalive=On ping=500ms retry=1 timeout=300
 
         # Add ProxyPass for EST and .well-known URLs
-        ProxyPass /.well-known/        http://localhost:{{ .Values.ejbca.reverseProxy.targetEjbcaPort }}/.well-known/ keepalive=On ping=500ms retry=1 timeout=300
+        ProxyPass /.well-known/        http://localhost:{{ .targetPort }}/.well-known/ keepalive=On ping=500ms retry=1 timeout=300
     </VirtualHost>
+    {{- end }}
 
-    # 8080 used by K8s health check. No client cert auth or SSL; port 80
-    <VirtualHost *:8080>
-        # Disallow any HTTP method that is not HEAD, GET or POST
-        RewriteEngine On
-        RewriteCond %{REQUEST_METHOD} !^(HEAD|GET|POST)$ [NC]
-        RewriteRule .* - [F,L]
+    # <VirtualHost *:8080>
+    #     # Disallow any HTTP method that is not HEAD, GET or POST
+    #     RewriteEngine On
+    #     RewriteCond %{REQUEST_METHOD} !^(HEAD|GET|POST)$ [NC]
+    #     RewriteRule .* - [F,L]
 
-        # Allow encoded slashes for OCSP GET
-        AllowEncodedSlashes On
+    #     # Allow encoded slashes for OCSP GET
+    #     AllowEncodedSlashes On
 
-        # Proxy http requests from K8s ingress to EJBCA via port 8082
-        ProxyPass /ejbca/       ajp://localhost:8009/ejbca/ keepalive=On ping=500ms retry=1 timeout=300
-    </VirtualHost>
+    #     # Proxy http requests from K8s ingress to EJBCA via port 8082
+    #     ProxyPass /ejbca/       http://localhost:8009/ejbca/ keepalive=On ping=500ms retry=1 timeout=300
+    # </VirtualHost>
 kind: ConfigMap
 metadata:
   name: httpd-configmap

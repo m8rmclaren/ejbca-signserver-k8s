@@ -12,7 +12,7 @@ spec:
   {{- range .Values.ejbca.reverseProxy.service.ports }}
     - name: {{ .name }}
       port: {{ .port }}
-      targetPort: {{ .targetPort}}
+      targetPort: {{ .port}}
       protocol: {{ .protocol }}
       {{- if contains "NodePort" $svcType }}
       nodePort: {{ .nodePort }}

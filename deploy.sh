@@ -164,6 +164,13 @@ initEJBCADatabase() {
     helm_install_args+=("--set" "ejbca.extraEnvironmentVars[4].name=EJBCA_SUB_CA_NAME")
     helm_install_args+=("--set" "ejbca.extraEnvironmentVars[4].value=$EJBCA_SUB_CA_NAME")
 
+    k8s_reverseproxy_service_fqdn="ejbca-rp-service.$EJBCA_NAMESPACE.svc.cluster.local"
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[5].name=EJBCA_CLUSTER_REVERSEPROXY_FQDN")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[5].value=$k8s_reverseproxy_service_fqdn")
+
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[6].name=EJBCA_RP_TLS_SECRET_NAME")
+    helm_install_args+=("--set" "ejbca.extraEnvironmentVars[6].value=ejbca-reverseproxy-tls")
+
     helm_install_args+=("--set" "ejbca.image.repository=$EJBCA_IMAGE")
     helm_install_args+=("--set" "ejbca.image.tag=$EJBCA_TAG")
     if [ ! -z "$IMAGE_PULL_SECRET_NAME" ]; then
@@ -257,6 +264,7 @@ deployEJBCA() {
 # Export variables for use in the script, and test the API connection
 setupEjbcaForScript() {
     EJBCA_HOSTNAME="$EJBCA_INGRESS_HOSTNAME"
+    EJBCA_IN_CLUSTER_HOSTNAME="ejbca-rp-service.$EJBCA_NAMESPACE.svc.cluster.local:8443"
     EJBCA_CA_NAME="$EJBCA_SUB_CA_NAME"
     EJBCA_CERTIFICATE_PROFILE_NAME="tlsServerAuth"
     EJBCA_END_ENTITY_PROFILE_NAME="tlsServerAnyCA"
@@ -394,6 +402,7 @@ createEnvFile() {
 
     touch ./ejbca.env
     echo "EJBCA_HOSTNAME=$EJBCA_INGRESS_HOSTNAME" > ./ejbca.env
+    echo "EJBCA_IN_CLUSTER_HOSTNAME=$EJBCA_IN_CLUSTER_HOSTNAME" >> ./ejbca.env
     
     echo "EJBCA_CLIENT_CERT_PATH=$(pwd)/superadmin.pem" >> ./ejbca.env
     echo "EJBCA_CLIENT_CERT_KEY_PATH=$(pwd)/superadmin.key" >> ./ejbca.env
