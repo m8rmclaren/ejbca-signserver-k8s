@@ -259,6 +259,8 @@ deployEJBCA() {
 
     # Wait for the EJBCA node to be ready
     waitForEJBCANode "$EJBCA_NAMESPACE" "$ejbca_pod_name"
+
+    sleep 5
 }
 
 # Export variables for use in the script, and test the API connection
