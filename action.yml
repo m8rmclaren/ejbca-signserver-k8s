@@ -44,6 +44,7 @@ runs:
         kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
 
         kubectl patch configmap ingress-nginx-controller -n ingress-nginx --patch '{"data":{"allow-snippet-annotations":"true"}}'
+        kubectl patch configmap ingress-nginx-controller -n ingress-nginx --patch '{"data":{"annotations-risk-level":"Critical"}}'
 
         kubectl wait --namespace ingress-nginx \
           --for=condition=ready pod \
